@@ -3,3 +3,7 @@ node_modules/
 next-env.d.ts
 target/
 *.log
+# V-CIP evidence and audit log: personal data, never commit
+vcip-data/
+*.jsonl
+.env*
