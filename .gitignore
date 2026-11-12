@@ -7,3 +7,6 @@ target/
 vcip-data/
 *.jsonl
 .env*
+next-api/AGENTS.md
+next-api/CLAUDE.md
+*.tsbuildinfo

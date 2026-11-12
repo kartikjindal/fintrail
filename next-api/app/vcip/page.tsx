@@ -40,7 +40,16 @@ export default function CustomerVcip() {
 
       const pc = new RTCPeerConnection({ iceServers: ICE });
       const media = stream;
+      // RBI s.18(a)(iv): keep resolution (drop frame rate instead) so the face and PAN stay legible.
+      const cam = media.getVideoTracks()[0];
+      if (cam) cam.contentHint = "detail";
       media.getTracks().forEach((t) => pc.addTrack(t, media));
+      const sender = pc.getSenders().find((x) => x.track?.kind === "video");
+      if (sender) {
+        const p = sender.getParameters() as RTCRtpSendParameters & { degradationPreference?: string };
+        p.degradationPreference = "maintain-resolution";
+        await sender.setParameters(p).catch(() => {});
+      }
       pc.ontrack = (e) => (remote.current!.srcObject = e.streams[0]);
       pc.onconnectionstatechange = () => {
         if (pc.connectionState === "connected") setStatus("Connected. Follow the officer's instructions.");

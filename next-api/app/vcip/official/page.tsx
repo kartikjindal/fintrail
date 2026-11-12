@@ -63,6 +63,22 @@ function startRecording(video: HTMLVideoElement, remote: MediaStream, mine: Medi
   };
 }
 
+// RBI s.18(a)(iv): evidence must identify the customer beyond doubt. Refuse low-res or badly lit frames.
+function frameProblem(video: HTMLVideoElement): string | null {
+  if (video.videoWidth < 640) return `Video is only ${video.videoWidth}×${video.videoHeight}. Wait a few seconds for it to sharpen.`;
+  const c = document.createElement("canvas");
+  [c.width, c.height] = [64, 36];
+  const ctx = c.getContext("2d", { willReadFrequently: true })!;
+  ctx.drawImage(video, 0, 0, 64, 36);
+  const d = ctx.getImageData(0, 0, 64, 36).data;
+  let sum = 0;
+  for (let i = 0; i < d.length; i += 4) sum += 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+  const mean = sum / (d.length / 4);
+  if (mean < 60) return `Too dark (brightness ${Math.round(mean)}/255). Ask the customer to face a light.`;
+  if (mean > 200) return `Too bright (brightness ${Math.round(mean)}/255). Ask the customer to move away from the light.`;
+  return null;
+}
+
 function snapshot(video: HTMLVideoElement) {
   const c = document.createElement("canvas");
   [c.width, c.height] = [video.videoWidth, video.videoHeight];
@@ -124,6 +140,12 @@ export default function OfficialVcip() {
     let stop = false;
     let timer: ReturnType<typeof setTimeout>;
     let close = () => {};
+    // MediaPipe's wasm logs "INFO: ..." through console.error; Next's dev overlay shows it as an error. Drop only those.
+    const consoleError = console.error;
+    console.error = (...args: unknown[]) => {
+      if (typeof args[0] === "string" && args[0].startsWith("INFO:")) return;
+      consoleError(...args);
+    };
     (async () => {
       const { FaceLandmarker, FilesetResolver } = await import("@mediapipe/tasks-vision");
       const fl = await FaceLandmarker.createFromOptions(await FilesetResolver.forVisionTasks(MEDIAPIPE), {
@@ -155,6 +177,7 @@ export default function OfficialVcip() {
       stop = true;
       clearTimeout(timer);
       close();
+      console.error = consoleError;
     };
   }, [inCall]);
 
@@ -197,6 +220,13 @@ export default function OfficialVcip() {
       hangUp();
       setMsg(e instanceof Error ? e.message : String(e));
     }
+  }
+
+  async function capture(kind: "photo" | "pan") {
+    const problem = frameProblem(remote.current!);
+    if (problem) return setMsg(`${kind}: ${problem}`);
+    setMsg("");
+    await upload(kind, await snapshot(remote.current!));
   }
 
   async function upload(kind: string, blob: Blob) {
@@ -282,15 +312,15 @@ export default function OfficialVcip() {
         <h3>Ask in this order</h3>
         <ol>{s?.questions.map((q) => <li key={q}>{q}</li>)}</ol>
         <p>
-          Camera saw: faces {live.faces} {live.faces > 1 && <b style={{ color: "#b00" }}>(more than one person!)</b>} · turn left {seen.left ? "✓" : "–"} · turn
+          Video {remote.current?.videoWidth ?? 0}×{remote.current?.videoHeight ?? 0} · Camera saw: faces {live.faces} {live.faces > 1 && <b style={{ color: "#b00" }}>(more than one person!)</b>} · turn left {seen.left ? "✓" : "–"} · turn
           right {seen.right ? "✓" : "–"} · blink {seen.blink ? "✓" : "–"} · smile {seen.smile ? "✓" : "–"}
         </p>
 
         <p style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button disabled={!inCall || uploaded.photo} onClick={async () => upload("photo", await snapshot(remote.current!))}>
+          <button disabled={!inCall || uploaded.photo} onClick={() => capture("photo")}>
             Capture photo {uploaded.photo && "✓"}
           </button>
-          <button disabled={!inCall || uploaded.pan || ePan} onClick={async () => upload("pan", await snapshot(remote.current!))}>
+          <button disabled={!inCall || uploaded.pan || ePan} onClick={() => capture("pan")}>
             Capture PAN card {uploaded.pan && "✓"}
           </button>
           <label>
